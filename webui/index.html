@@ -1,0 +1,177 @@
+<title>Animatorio — Motion Editor</title>
+<link rel="stylesheet" href="/style.css" />
+
+<div class="app">
+  <header class="topbar">
+    <div class="toolbar-row">
+      <h1>Motion Editor</h1>
+
+      <div class="toolbar-group">
+        <label class="field">
+          <span>Asset</span>
+          <div class="inline-row">
+            <span id="asset-path" class="asset-path">No asset open</span>
+            <button id="open-asset-btn">Open…</button>
+            <button id="new-asset-btn">New from image…</button>
+          </div>
+        </label>
+      </div>
+
+      <div class="toolbar-divider" aria-hidden="true"></div>
+
+      <div class="toolbar-group">
+        <label class="field checkbox">
+          <input type="checkbox" id="isolate-toggle" checked />
+          <span>Isolate this layer</span>
+        </label>
+
+        <label class="field" title="Playback speed for this sprite in the preview. Apply the generated sheet's timing however you like in your target game or application.">
+          <span>Animation speed</span>
+          <input type="number" id="animation-speed-input" step="0.01" min="0.01" style="width: 70px" />
+        </label>
+      </div>
+
+      <div class="spacer"></div>
+    </div>
+
+    <div class="toolbar-row topbar-status-row">
+      <span id="animation-speed-note" class="muted-note"></span>
+      <span id="status" class="status"></span>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <section class="stage-panel">
+      <div class="stage-toolbar">
+        <button id="zoom-out">−</button>
+        <span id="zoom-label">1.0x</span>
+        <button id="zoom-in">+</button>
+        <button id="zoom-reset">Reset</button>
+        <div class="toolbar-divider-v" aria-hidden="true"></div>
+        <label class="field checkbox">
+          <input type="checkbox" id="smoothing-toggle" />
+          <span>Smooth scaling</span>
+        </label>
+        <label class="field checkbox">
+          <input type="checkbox" id="overlay-toggle" checked />
+          <span>Show handles</span>
+        </label>
+        <div class="spacer"></div>
+        <button id="play-toggle">Pause</button>
+      </div>
+      <div class="stage-viewport">
+        <div class="stage-wrap">
+          <canvas id="stage"></canvas>
+        </div>
+      </div>
+      <p class="hint">
+        Drag the crosshair to reposition. Drag the arrow tips to scale/skew (perspective) each plane
+        (cogs and fans instead get a single corner handle for an upright rectangle, plus a dashed
+        handle for the concentric hub/center-fill size). Click a handle then use arrow keys to nudge
+        it (hold Shift for 0.1px steps).
+      </p>
+    </section>
+
+    <aside class="side-panel">
+      <div class="panel">
+        <h2>Layers</h2>
+        <p class="muted-note">
+          Click a layer to select and edit it. Later in the list draws on top of (occludes) earlier
+          layers -- use ↑/↓ on a row to change what's in front.
+        </p>
+        <div id="layer-list" class="layer-list"></div>
+        <div class="add-layer-row">
+          <select id="add-motion-type">
+            <option value="mechanical_rotor">mechanical_rotor (fan)</option>
+            <option value="mechanical_gear">mechanical_gear (cog)</option>
+            <option value="vertical_gear">vertical_gear (edge-on cog)</option>
+            <option value="source_occluder">source_occluder (editable foreground crop)</option>
+            <option value="vibration">vibration (selected piece)</option>
+            <option value="gauge">gauge (moving needle)</option>
+            <option value="surface_scan">surface_scan</option>
+            <option value="sweep">sweep</option>
+            <option value="orbit_glint">orbit_glint</option>
+            <option value="signal">signal</option>
+            <option value="pulse">pulse</option>
+            <option value="chase">chase</option>
+            <option value="steam">steam</option>
+          </select>
+          <button id="add-layer-btn" class="primary">+ Add layer</button>
+        </div>
+        <p class="muted-note">New layers land near sprite-center with placeholder geometry -- drag/edit into place.</p>
+      </div>
+
+      <div id="geometry-panel" class="panel"></div>
+      <div id="secondary-panel" class="panel"></div>
+      <div id="generic-panel" class="panel"></div>
+      <div id="common-panel" class="panel"></div>
+
+      <div class="panel">
+        <h2>Raw motion JSON</h2>
+        <textarea id="raw-json" spellcheck="false"></textarea>
+        <div class="button-row">
+          <button id="apply-json">Apply JSON</button>
+          <button id="format-json">Format</button>
+        </div>
+        <p id="json-error" class="error"></p>
+      </div>
+
+      <div class="panel actions">
+        <h2>Persist</h2>
+        <p id="dirty-indicator" class="muted-note"></p>
+        <div class="button-row">
+          <button id="save-btn">Save all layers to JSON</button>
+        </div>
+        <div class="button-row">
+          <button id="regenerate-btn" class="primary">Save + Regenerate PNG</button>
+        </div>
+        <div class="button-row">
+          <button id="export-gif-btn">Export GIF</button>
+        </div>
+        <div class="button-row">
+          <button id="reload-btn" class="danger">Reload from disk (discard edits)</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+<div id="browse-overlay" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h2 id="browse-title">Open file</h2>
+      <button id="browse-close" class="modal-close">×</button>
+    </div>
+    <div class="modal-toolbar">
+      <button id="browse-up">⬆ Up</button>
+      <span id="browse-path" class="browse-path"></span>
+    </div>
+    <div id="browse-list" class="browse-list"></div>
+    <p id="browse-error" class="error"></p>
+  </div>
+</div>
+
+<div id="new-asset-overlay" class="modal-overlay hidden">
+  <div class="modal-box">
+    <div class="modal-header">
+      <h2>New asset</h2>
+      <button id="new-asset-close" class="modal-close">×</button>
+    </div>
+    <p class="muted-note" id="new-asset-source-label"></p>
+    <label class="field">
+      <span>Asset name</span>
+      <input type="text" id="new-asset-name" />
+    </label>
+    <label class="field">
+      <span>Output sprite sheet path</span>
+      <input type="text" id="new-asset-output" />
+    </label>
+    <p id="new-asset-error" class="error"></p>
+    <div class="button-row">
+      <button id="new-asset-cancel">Cancel</button>
+      <button id="new-asset-confirm" class="primary">Create asset</button>
+    </div>
+  </div>
+</div>
+
+<script src="/app.js"></script>

@@ -1,0 +1,70 @@
+{
+  "assets": [
+    {
+      "name": "demo-gear",
+      "source": "examples/demo-gear/input.png",
+      "output": "examples/demo-gear/output.png",
+      "frame_size": [
+        256,
+        256
+      ],
+      "frame_count": 24,
+      "line_length": 6,
+      "animation_speed": 0.25,
+      "loop_seconds": 1.6,
+      "sheet_size": [
+        1536,
+        1024
+      ],
+      "minimum_identity_ratio": 0.94455,
+      "mean_identity_ratio": 0.944631,
+      "mean_step_difference": 0.285879,
+      "loop_seam_mean_difference": 0.278732,
+      "loop_seam_step_ratio": 0.975002
+    },
+    {
+      "name": "demo-rotor",
+      "source": "examples/demo-rotor/input.png",
+      "output": "examples/demo-rotor/output.png",
+      "frame_size": [
+        256,
+        256
+      ],
+      "frame_count": 24,
+      "line_length": 6,
+      "animation_speed": 0.25,
+      "loop_seconds": 1.6,
+      "sheet_size": [
+        1536,
+        1024
+      ],
+      "minimum_identity_ratio": 0.972412,
+      "mean_identity_ratio": 0.972612,
+      "mean_step_difference": 0.074175,
+      "loop_seam_mean_difference": 0.072021,
+      "loop_seam_step_ratio": 0.970968
+    },
+    {
+      "name": "notary-office",
+      "source": "examples/notary-office.png",
+      "output": "examples/notary-office-animation.png",
+      "frame_size": [
+        192,
+        192
+      ],
+      "frame_count": 24,
+      "line_length": 6,
+      "animation_speed": 0.09,
+      "loop_seconds": 2.222,
+      "sheet_size": [
+        1152,
+        768
+      ],
+      "minimum_identity_ratio": 0.67863,
+      "mean_identity_ratio": 0.684645,
+      "mean_step_difference": 1.178041,
+      "loop_seam_mean_difference": 1.493815,
+      "loop_seam_step_ratio": 1.26805
+    }
+  ]
+}
