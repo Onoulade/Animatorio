@@ -42,6 +42,8 @@ python3 webui/server.py --port 8765 --no-browser --open animations/my-sprite.jso
 
 The editor previews the same server-side handlers used during generation, so the preview and the baked sheet use the same pipeline. Open an existing JSON asset or create one from an image, add and position motion layers, then save or export a GIF preview.
 
+The workspace is organized around the editing loop: the layer stack is on the left, the live canvas is in the center, and properties for the selected motion are on the right. Save, GIF export, and sheet generation remain available in the header. Direct JSON editing is still available under **Advanced JSON** when a motion needs a field that does not yet have a visual control.
+
 ### 3. Generate sprite sheets
 
 ```bash

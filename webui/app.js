@@ -1,3 +1,5 @@
+import { api } from "./api-client.js";
+
 "use strict";
 
 const PHASE_COUNT = 10;
@@ -26,6 +28,28 @@ const addLayerBtn = el("add-layer-btn");
 const dirtyIndicatorEl = el("dirty-indicator");
 const animationSpeedInput = el("animation-speed-input");
 const animationSpeedNote = el("animation-speed-note");
+const appShell = el("app-shell");
+const emptyStateEl = el("empty-state");
+const layerEmptyEl = el("layer-empty");
+const inspectorEmptyEl = el("inspector-empty");
+const inspectorTitleEl = el("inspector-title");
+const layerCountEl = el("layer-count");
+
+const MOTION_LABELS = {
+  mechanical_rotor: "Rotor / fan",
+  mechanical_gear: "Gear / cog",
+  vertical_gear: "Edge-on gear",
+  source_occluder: "Foreground occluder",
+  vibration: "Vibration",
+  gauge: "Gauge needle",
+  surface_scan: "Surface scan",
+  sweep: "Light sweep",
+  orbit_glint: "Orbit glint",
+  signal: "Signal",
+  pulse: "Pulse",
+  chase: "Chase lights",
+  steam: "Steam",
+};
 
 // Pipeline-wide constant (see asset_store.FRAME_COUNT on the Python side) --
 // every asset uses the same 24-frame loop, so it's not stored per asset.
@@ -77,6 +101,15 @@ function setStatus(text, kind) {
   statusEl.className = "status" + (kind ? " " + kind : "");
 }
 
+function updateEditorAvailability() {
+  const hasAsset = Boolean(state.asset);
+  appShell.dataset.hasAsset = hasAsset ? "true" : "false";
+  emptyStateEl.classList.toggle("hidden", hasAsset);
+  document.querySelectorAll("[data-requires-asset]").forEach((control) => {
+    control.disabled = !hasAsset;
+  });
+}
+
 // ------------------------------------------------------------------ asset
 
 function pathDirname(path) {
@@ -117,9 +150,14 @@ function clearAssetView() {
   rawJsonEl.value = "";
   canvas.width = 0;
   canvas.height = 0;
+  layerCountEl.textContent = "0";
+  layerEmptyEl.classList.add("visible");
+  inspectorEmptyEl.classList.add("visible");
+  inspectorTitleEl.textContent = "Inspector";
   updateAssetPathLabel();
+  updateEditorAvailability();
   updateDirtyIndicator();
-  setStatus('No asset open -- click "Open…" to edit one, or "New from image…" to start one.', "ok");
+  setStatus("Ready", "ok");
 }
 
 function iconButton(label, title, onClick) {
@@ -135,35 +173,43 @@ function iconButton(label, title, onClick) {
   return button;
 }
 
-// The layer list is the single place to see, pick, reorder, duplicate or
-// delete layers -- every row-specific action lives as an icon button on
-// that row, so "which layer does this affect" is never ambiguous.
 function renderLayerList() {
   layerListEl.innerHTML = "";
-  state.workingMotions.forEach((motion, index) => {
-    const layerRow = document.createElement("div");
-    layerRow.className = "layer-row" + (index === state.motionIndex ? " selected" : "");
+  layerCountEl.textContent = String(state.workingMotions.length);
+  layerEmptyEl.classList.toggle("visible", Boolean(state.asset) && state.workingMotions.length === 0);
+  state.workingMotions
+    .map((motion, index) => ({ motion, index }))
+    .reverse()
+    .forEach(({ motion, index }, displayIndex) => {
+      const layerRow = document.createElement("div");
+      layerRow.className = "layer-row" + (index === state.motionIndex ? " selected" : "");
 
-    const body = document.createElement("div");
-    body.className = "layer-row-body";
-    body.textContent = `${index}: ${motion.type}${motion.label ? ` — ${motion.label}` : ""}`;
-    body.addEventListener("click", () => selectLayer(index));
-    layerRow.appendChild(body);
+      const body = document.createElement("div");
+      body.className = "layer-row-body";
+      const title = document.createElement("span");
+      title.className = "layer-row-title";
+      title.textContent = motion.label || MOTION_LABELS[motion.type] || motion.type;
+      const meta = document.createElement("span");
+      meta.className = "layer-row-meta";
+      meta.textContent = `${String(displayIndex + 1).padStart(2, "0")} · ${motion.type}`;
+      body.append(title, meta);
+      body.addEventListener("click", () => selectLayer(index));
+      layerRow.appendChild(body);
 
-    const actions = document.createElement("div");
-    actions.className = "layer-row-actions";
-    const upBtn = iconButton("↑", "Move up -- renders earlier, more hidden behind later layers", () => moveLayer(index, -1));
-    upBtn.disabled = index === 0;
-    const downBtn = iconButton("↓", "Move down -- renders later, occludes earlier layers", () => moveLayer(index, 1));
-    downBtn.disabled = index === state.workingMotions.length - 1;
-    const duplicateBtn = iconButton("⧉", "Duplicate this layer", () => duplicateLayer(index));
-    const deleteBtn = iconButton("🗑", "Delete this layer", () => deleteLayer(index));
-    deleteBtn.classList.add("danger");
-    actions.append(upBtn, downBtn, duplicateBtn, deleteBtn);
-    layerRow.appendChild(actions);
+      const actions = document.createElement("div");
+      actions.className = "layer-row-actions";
+      const upBtn = iconButton("Back", "Move behind", () => moveLayer(index, -1));
+      upBtn.disabled = index === 0;
+      const downBtn = iconButton("Front", "Move in front", () => moveLayer(index, 1));
+      downBtn.disabled = index === state.workingMotions.length - 1;
+      const duplicateBtn = iconButton("Copy", "Duplicate layer", () => duplicateLayer(index));
+      const deleteBtn = iconButton("Delete", "Delete layer", () => deleteLayer(index));
+      deleteBtn.classList.add("danger");
+      actions.append(upBtn, downBtn, duplicateBtn, deleteBtn);
+      layerRow.appendChild(actions);
 
-    layerListEl.appendChild(layerRow);
-  });
+      layerListEl.appendChild(layerRow);
+    });
 }
 
 function assetAnimationSpeed(asset) {
@@ -620,6 +666,7 @@ function applyOpenedAsset(asset, path) {
   animationSpeedInput.value = state.animationSpeed;
   updateAnimationSpeedNote();
   updateAssetPathLabel();
+  updateEditorAvailability();
 
   const [w, h] = asset.size;
   state.baseScale = clamp(560 / Math.max(w, h), 1, 6);
@@ -636,6 +683,10 @@ function selectLayer(index) {
   // through the panels/canvas mutates this same object in place, so it's
   // already "saved" into the working set the instant you switch away.
   state.motion = index >= 0 ? state.workingMotions[index] : null;
+  inspectorEmptyEl.classList.toggle("visible", !state.motion);
+  inspectorTitleEl.textContent = state.motion
+    ? state.motion.label || MOTION_LABELS[state.motion.type] || state.motion.type
+    : "Inspector";
   state.selectedHandleId = null;
   renderLayerList();
   resizeCanvas();
@@ -3801,8 +3852,7 @@ async function doRender() {
     // No layers on this sprite -- just show the plain source sprite.
     setStatus("Rendering…");
     try {
-      const response = await fetch("/api/source_image");
-      const blob = await response.blob();
+      const blob = await api.getSourceImage();
       const url = URL.createObjectURL(blob);
       const image = new Image();
       await new Promise((resolve) => {
@@ -3820,28 +3870,19 @@ async function doRender() {
 
   setStatus("Rendering…");
   const phases = Array.from({ length: PHASE_COUNT }, (_, i) => i / PHASE_COUNT);
-  let response;
+  let payload;
   try {
-    response = await fetch("/api/preview", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        motions: state.workingMotions,
-        selected_index: state.motionIndex,
-        phases,
-        isolate: isolateToggle.checked,
-      }),
+    payload = await api.preview({
+      motions: state.workingMotions,
+      selected_index: state.motionIndex,
+      phases,
+      isolate: isolateToggle.checked,
     });
   } catch (error) {
-    setStatus("Request failed: " + error.message, "error");
+    setStatus("Render failed: " + error.message, "error");
     return;
   }
-  const payload = await response.json();
   if (seq !== state.requestSeq) return; // superseded by a newer edit
-  if (!response.ok || payload.error) {
-    setStatus("Render error: " + (payload.error || response.statusText), "error");
-    return;
-  }
   const images = await Promise.all(
     payload.frames.map(
       (b64) =>
@@ -3874,13 +3915,9 @@ const browseState = { kind: "json", dir: null, parent: null, onSelect: null, las
 
 async function browseTo(dir) {
   browseErrorEl.textContent = "";
-  const query = new URLSearchParams({ kind: browseState.kind });
-  if (dir) query.set("path", dir);
   let payload;
   try {
-    const response = await fetch(`/api/browse?${query}`);
-    payload = await response.json();
-    if (!response.ok || payload.error) throw new Error(payload.error || "Failed to list directory");
+    payload = await api.browse(browseState.kind, dir);
   } catch (error) {
     browseErrorEl.textContent = error.message;
     return;
@@ -3940,20 +3977,11 @@ async function confirmDiscardIfNeeded() {
 async function openAssetFile(path) {
   if (!(await confirmDiscardIfNeeded())) return;
   setStatus("Opening…");
-  let response, payload;
+  let payload;
   try {
-    response = await fetch("/api/open_asset_file", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path }),
-    });
-    payload = await response.json();
+    payload = await api.openAssetFile(path);
   } catch (error) {
     setStatus("Open failed: " + error.message, "error");
-    return;
-  }
-  if (!response.ok || payload.error) {
-    setStatus("Open failed: " + (payload.error || response.statusText), "error");
     return;
   }
   applyOpenedAsset(payload.asset, payload.path);
@@ -3968,23 +3996,16 @@ el("open-asset-btn").addEventListener("click", () => {
   });
 });
 
+el("welcome-open-btn").addEventListener("click", () => el("open-asset-btn").click());
+
 async function openAssetFromImage(sourcePath) {
   if (!(await confirmDiscardIfNeeded())) return;
   setStatus("Opening image…");
-  let response, payload;
+  let payload;
   try {
-    response = await fetch("/api/open_asset_from_image", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source_path: sourcePath }),
-    });
-    payload = await response.json();
+    payload = await api.openAssetFromImage({ source_path: sourcePath });
   } catch (error) {
     setStatus("Open failed: " + error.message, "error");
-    return;
-  }
-  if (!response.ok || payload.error) {
-    setStatus("Open failed: " + (payload.error || response.statusText), "error");
     return;
   }
   if (payload.needs_details) {
@@ -4003,6 +4024,8 @@ el("new-asset-btn").addEventListener("click", async () => {
     onSelect: (path) => openAssetFromImage(path),
   });
 });
+
+el("welcome-new-btn").addEventListener("click", () => el("new-asset-btn").click());
 
 // ---------------------------------------------------------- new asset modal
 
@@ -4041,20 +4064,15 @@ el("new-asset-confirm").addEventListener("click", async () => {
     newAssetErrorEl.textContent = "Name and output path are required.";
     return;
   }
-  let response, payload;
+  let payload;
   try {
-    response = await fetch("/api/open_asset_from_image", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ source_path: pendingNewAssetSource, name, output_path: outputPath }),
+    payload = await api.openAssetFromImage({
+      source_path: pendingNewAssetSource,
+      name,
+      output_path: outputPath,
     });
-    payload = await response.json();
   } catch (error) {
     newAssetErrorEl.textContent = error.message;
-    return;
-  }
-  if (!response.ok || payload.error) {
-    newAssetErrorEl.textContent = payload.error || "Failed to create asset";
     return;
   }
   newAssetOverlay.classList.add("hidden");
@@ -4114,10 +4132,11 @@ el("regenerate-btn").addEventListener("click", async () => {
   const saved = await saveAsset();
   if (!saved) return;
   setStatus("Regenerating sheet…");
-  const response = await fetch("/api/regenerate", { method: "POST" });
-  const payload = await response.json();
-  if (!response.ok || payload.error) {
-    setStatus("Regenerate failed: " + (payload.error || response.statusText), "error");
+  let payload;
+  try {
+    payload = await api.regenerate();
+  } catch (error) {
+    setStatus("Generate failed: " + error.message, "error");
     return;
   }
   const record = payload.record;
@@ -4134,10 +4153,11 @@ el("export-gif-btn").addEventListener("click", async () => {
 
 el("reload-btn").addEventListener("click", async () => {
   if (!confirm("Discard unsaved edits and reload the current JSON from disk?")) return;
-  const response = await fetch("/api/reload", { method: "POST" });
-  const payload = await response.json();
-  if (!response.ok || payload.error) {
-    setStatus("Reload failed: " + (payload.error || response.statusText), "error");
+  let payload;
+  try {
+    payload = await api.reload();
+  } catch (error) {
+    setStatus("Reload failed: " + error.message, "error");
     return;
   }
   applyOpenedAsset(payload.asset, payload.path);
@@ -4153,22 +4173,13 @@ async function exportGif() {
   btn.disabled = true;
   setStatus("Exporting GIF…");
   try {
-    const response = await fetch("/api/export_gif", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        motions: state.workingMotions,
-        selected_index: state.motionIndex >= 0 ? state.motionIndex : 0,
-        isolate: isolateToggle.checked,
-        animation_speed: state.animationSpeed,
-        frame_count: FRAME_COUNT,
-      }),
+    const payload = await api.exportGif({
+      motions: state.workingMotions,
+      selected_index: state.motionIndex >= 0 ? state.motionIndex : 0,
+      isolate: isolateToggle.checked,
+      animation_speed: state.animationSpeed,
+      frame_count: FRAME_COUNT,
     });
-    const payload = await response.json();
-    if (!response.ok || payload.error) {
-      setStatus("GIF export failed: " + (payload.error || response.statusText), "error");
-      return;
-    }
     const a = document.createElement("a");
     a.href = "data:image/gif;base64," + payload.gif;
     a.download = payload.filename || (state.asset.name + ".gif");
@@ -4189,17 +4200,14 @@ async function saveAsset() {
     return false;
   }
   setStatus("Saving…");
-  const response = await fetch("/api/save", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
+  let payload;
+  try {
+    payload = await api.save({
       motions: state.workingMotions,
       animation_speed: state.animationSpeed,
-    }),
-  });
-  const payload = await response.json();
-  if (!response.ok || payload.error) {
-    setStatus("Save failed: " + (payload.error || response.statusText), "error");
+    });
+  } catch (error) {
+    setStatus("Save failed: " + error.message, "error");
     return false;
   }
   state.asset.motions = JSON.parse(JSON.stringify(state.workingMotions));
@@ -4212,12 +4220,16 @@ async function saveAsset() {
 // --------------------------------------------------------------------- go
 
 (async function init() {
-  const response = await fetch("/api/asset");
-  const payload = await response.json();
-  if (payload.asset) {
-    applyOpenedAsset(payload.asset, payload.path);
-    setStatus(`Opened "${payload.asset.name}"`, "ok");
-  } else {
+  try {
+    const payload = await api.getAsset();
+    if (payload.asset) {
+      applyOpenedAsset(payload.asset, payload.path);
+      setStatus(`Opened "${payload.asset.name}"`, "ok");
+    } else {
+      clearAssetView();
+    }
+  } catch (error) {
     clearAssetView();
+    setStatus(error.message, "error");
   }
 })();
