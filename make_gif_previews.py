@@ -24,8 +24,8 @@ def load_frames(asset: dict) -> list[Image.Image]:
     sheet_path = ROOT / asset["output"]
     with Image.open(source_path) as source, Image.open(sheet_path) as sheet:
         width, height = source.size
-        frame_count = int(asset.get("frame_count", asset_store.FRAME_COUNT))
-        line_length = int(asset.get("line_length", asset_store.LINE_LENGTH))
+        frame_count = asset_store.frame_count_for(asset)
+        line_length = asset_store.sheet_columns(frame_count)
         return [
             sheet.crop(
                 (

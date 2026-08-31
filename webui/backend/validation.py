@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Mapping
 from typing import Any
+
+import asset_store
 
 from .errors import ApiError
 
@@ -25,9 +28,26 @@ def require_number(value: Any, label: str, *, minimum: float | None = None) -> f
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ApiError(f"{label} must be a number", code="invalid_field")
     number = float(value)
+    if not math.isfinite(number):
+        raise ApiError(f"{label} must be finite", code="invalid_field")
     if minimum is not None and number < minimum:
         raise ApiError(f"{label} must be at least {minimum:g}", code="invalid_field")
     return number
+
+
+def require_frame_count(value: Any, label: str = "frame_count") -> int:
+    number = require_number(value, label, minimum=1)
+    if not number.is_integer():
+        raise ApiError(f"{label} must be a whole number", code="invalid_field")
+    count = int(number)
+    if count > asset_store.MAX_FRAME_COUNT:
+        raise ApiError(
+            f"{label} must be at most {asset_store.MAX_FRAME_COUNT}",
+            code="invalid_field",
+        )
+    if asset_store.is_prime(count):
+        raise ApiError(f"{label} cannot be prime", code="invalid_field")
+    return count
 
 
 def require_asset_name(value: Any) -> str:
@@ -54,6 +74,12 @@ def validate_asset(asset: Any) -> dict[str, Any]:
             raise ApiError(f"asset.motions[{index}] must have a motion type", code="invalid_asset")
     speed = obj.get("animation_speed", 0.25)
     require_number(speed, "asset.animation_speed", minimum=0.01)
+    # Optional frame_count for sprite sheet generation. Columns are derived.
+    if "frame_count" in obj:
+        require_frame_count(obj["frame_count"], "asset.frame_count")
+    # `line_length` was the old editable layout field. Keep it out of the
+    # normalized asset contract; generation derives the columns from frames.
+    obj.pop("line_length", None)
     return obj
 
 

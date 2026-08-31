@@ -147,10 +147,36 @@
             <div id="inspector-empty" class="inspector-empty">
               <strong>Select a layer</strong>
             </div>
-            <div id="geometry-panel" class="panel"></div>
-            <div id="secondary-panel" class="panel"></div>
-            <div id="generic-panel" class="panel"></div>
-            <div id="common-panel" class="panel"></div>
+
+            <details class="panel asset-section" id="asset-section" open>
+              <summary>
+                <span>Asset</span>
+                <small>Sprite sheet settings</small>
+              </summary>
+              <div class="row">
+                <label for="asset-frame-count">Frame count</label>
+                <input type="number" id="asset-frame-count" min="1" max="64" step="1" data-requires-asset />
+              </div>
+              <div class="row">
+                <label>Sheet columns</label>
+                <span id="asset-sheet-columns" class="value">—</span>
+              </div>
+              <div class="row">
+                <label>Sheet size</label>
+                <span id="asset-sheet-size" class="value">—</span>
+              </div>
+            </details>
+
+            <details class="panel layer-section" id="layer-section" open>
+              <summary>
+                <span>Layer</span>
+                <small id="layer-section-subtitle">Select a layer</small>
+              </summary>
+              <div id="geometry-panel" class="panel"></div>
+              <div id="secondary-panel" class="panel"></div>
+              <div id="generic-panel" class="panel"></div>
+              <div id="common-panel" class="panel"></div>
+            </details>
 
             <details class="json-panel panel">
               <summary>

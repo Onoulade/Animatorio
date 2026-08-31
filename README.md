@@ -2,7 +2,7 @@
 
 Animatorio turns a static image into an animated sprite sheet.
 
-It is primarily intended for **Factorio modders** who want to add motion to an existing building, machine, or other sprite without redrawing every frame by hand. You describe the moving parts in JSON, preview them in the web editor, and export a 24-frame sprite sheet for use in your mod.
+It is primarily intended for **Factorio modders** who want to add motion to an existing building, machine, or other sprite without redrawing every frame by hand. You describe the moving parts in JSON, preview them in the web editor, and export a configurable sprite sheet for use in your mod.
 
 The built-in motions are deliberately very Factorio-oriented: mechanical rotors, gears, gauges, indicator lights, steam, and similar machine details. Animatorio is not limited to Factorio, though. It can be useful anywhere that needs sprite-sheet generation, provided the available motion types fit the image and the target pipeline.
 
@@ -16,7 +16,7 @@ Animatorio applies only the localized motions declared in an asset definition. T
 
 ![Animated sprite sheet](examples/notary-office-animation.png)
 
-The output is a fixed 6×4 sheet containing 24 frames. Loops are designed to close cleanly: mechanical parts advance by an integer number of pitches per loop, and vibration profiles use periodic harmonics.
+The default output is a 6×4 sheet containing 24 frames. The frame count can be changed per asset in the web editor, but prime counts are rejected so the sheet can use a derived rectangular layout. Loops are designed to close cleanly: mechanical parts advance by an integer number of pitches per loop, and vibration profiles use periodic harmonics.
 
 ## Quick start
 

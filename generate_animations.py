@@ -2185,8 +2185,8 @@ def mean_difference(left: Image.Image, right: Image.Image) -> float:
 def asset_metadata_record(
     asset: dict[str, Any], source: Image.Image, frames: list[Image.Image]
 ) -> dict[str, Any]:
-    frame_count = int(asset.get("frame_count", asset_store.FRAME_COUNT))
-    line_length = int(asset.get("line_length", asset_store.LINE_LENGTH))
+    frame_count = asset_store.frame_count_for(asset)
+    line_length = asset_store.sheet_columns(frame_count)
     animation_speed = float(asset.get("animation_speed", asset_store.NEW_ASSET_ANIMATION_SPEED))
     identities = [identity_ratio(source, frame) for frame in frames]
     step_differences = [
@@ -2226,8 +2226,8 @@ def metadata_from_existing_sheet(asset: dict[str, Any]) -> dict[str, Any]:
     """Measure a previously generated atlas without regenerating the asset."""
     source = load_rgba(ROOT / asset["source"])
     sheet = load_rgba(ROOT / asset["output"])
-    frame_count = int(asset.get("frame_count", asset_store.FRAME_COUNT))
-    line_length = int(asset.get("line_length", asset_store.LINE_LENGTH))
+    frame_count = asset_store.frame_count_for(asset)
+    line_length = asset_store.sheet_columns(frame_count)
     expected_size = (
         source.width * line_length,
         source.height * math.ceil(frame_count / line_length),
@@ -2258,8 +2258,8 @@ def generate_asset(asset: dict[str, Any]) -> dict[str, Any]:
     if source.size != expected:
         raise ValueError(f"{asset['name']}: expected source size {expected}, found {source.size}")
 
-    frame_count = int(asset.get("frame_count", asset_store.FRAME_COUNT))
-    line_length = int(asset.get("line_length", asset_store.LINE_LENGTH))
+    frame_count = asset_store.frame_count_for(asset)
+    line_length = asset_store.sheet_columns(frame_count)
     frames = [animate_frame(source, asset["motions"], phase(index, frame_count)) for index in range(frame_count)]
     identities = [identity_ratio(source, frame) for frame in frames]
     minimum_identity = float(asset.get("minimum_identity", asset_store.MINIMUM_IDENTITY))

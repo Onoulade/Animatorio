@@ -2,7 +2,6 @@ import { api } from "./api-client.js";
 
 "use strict";
 
-const PHASE_COUNT = 10;
 const HANDLE_HIT_PX = 9;
 
 const el = (id) => document.getElementById(id);
@@ -34,6 +33,12 @@ const layerEmptyEl = el("layer-empty");
 const inspectorEmptyEl = el("inspector-empty");
 const inspectorTitleEl = el("inspector-title");
 const layerCountEl = el("layer-count");
+const assetSectionEl = el("asset-section");
+const layerSectionEl = el("layer-section");
+const layerSectionSubtitleEl = el("layer-section-subtitle");
+const assetFrameCountEl = el("asset-frame-count");
+const assetSheetColumnsEl = el("asset-sheet-columns");
+const assetSheetSizeEl = el("asset-sheet-size");
 
 const MOTION_LABELS = {
   mechanical_rotor: "Rotor / fan",
@@ -51,9 +56,10 @@ const MOTION_LABELS = {
   steam: "Steam",
 };
 
-// Pipeline-wide constant (see asset_store.FRAME_COUNT on the Python side) --
-// every asset uses the same 24-frame loop, so it's not stored per asset.
-const FRAME_COUNT = 24;
+// Default frame count (see asset_store.FRAME_COUNT on the Python side).
+// Can be overridden per asset via the Asset inspector section.
+const DEFAULT_FRAME_COUNT = 24;
+const MAX_FRAME_COUNT = 64;
 
 const state = {
   // The single currently-open asset's full data (name/source/output/size/
@@ -71,6 +77,9 @@ const state = {
   // Per-asset animation speed, in-editor. Not a layer property --
   // one value per asset, persisted into the asset JSON on save.
   animationSpeed: 0.25,
+  // Per-asset frame count, persisted into the asset JSON. Sheet columns are
+  // derived from this count.
+  frameCount: 24,
   baseScale: 1,
   zoom: 1,
   frameImages: [],
@@ -93,6 +102,32 @@ function refreshGeometryInputs() {
 function clamp(value, lo, hi) {
   return Math.max(lo, Math.min(hi, value));
 }
+
+function isPrime(value) {
+  if (value < 2) return false;
+  for (let divisor = 2; divisor * divisor <= value; divisor += 1) {
+    if (value % divisor === 0) return false;
+  }
+  return true;
+}
+
+function validFrameCount(value) {
+  return Number.isInteger(value) && value >= 1 && value <= MAX_FRAME_COUNT && !isPrime(value);
+}
+
+function sheetColumns(frameCount) {
+  const divisors = [];
+  for (let value = 1; value <= frameCount; value += 1) {
+    if (frameCount % value === 0) divisors.push(value);
+  }
+  return divisors.sort((left, right) => {
+    const targetDistance = Math.abs(left - 6) - Math.abs(right - 6);
+    if (targetDistance !== 0) return targetDistance;
+    const squareRoot = Math.sqrt(frameCount);
+    return Math.abs(left - squareRoot) - Math.abs(right - squareRoot);
+  })[0];
+}
+
 function round2(value) {
   return Math.round(value * 100) / 100;
 }
@@ -141,6 +176,7 @@ function clearAssetView() {
   state.workingMotions = [];
   state.motionIndex = -1;
   state.motion = null;
+  state.frameCount = DEFAULT_FRAME_COUNT;
   state.frameImages = [];
   layerListEl.innerHTML = "";
   geometryPanel.innerHTML = "";
@@ -154,6 +190,9 @@ function clearAssetView() {
   layerEmptyEl.classList.add("visible");
   inspectorEmptyEl.classList.add("visible");
   inspectorTitleEl.textContent = "Inspector";
+  assetSectionEl.classList.add("hidden");
+  layerSectionEl.classList.remove("hidden");
+  layerSectionSubtitleEl.textContent = "Select a layer";
   updateAssetPathLabel();
   updateEditorAvailability();
   updateDirtyIndicator();
@@ -225,15 +264,17 @@ function frameIntervalMs() {
 
 function updateAnimationSpeedNote() {
   const speed = state.animationSpeed || 0.25;
-  const seconds = FRAME_COUNT / (60 * speed);
+  const frameCount = state.frameCount || DEFAULT_FRAME_COUNT;
+  const seconds = frameCount / (60 * speed);
   animationSpeedNote.textContent =
-    `${FRAME_COUNT} frames, ≈${seconds.toFixed(2)}s / loop`;
+    `${frameCount} frames, ≈${seconds.toFixed(2)}s / loop`;
 }
 
 function hasUnsavedChanges() {
   if (!state.asset) return false;
   if (JSON.stringify(state.workingMotions) !== JSON.stringify(state.asset.motions)) return true;
-  return Math.abs(state.animationSpeed - assetAnimationSpeed(state.asset)) > 1e-9;
+  if (Math.abs(state.animationSpeed - assetAnimationSpeed(state.asset)) > 1e-9) return true;
+  return state.frameCount !== (state.asset.frame_count ?? DEFAULT_FRAME_COUNT);
 }
 
 function updateDirtyIndicator() {
@@ -661,12 +702,14 @@ function applyOpenedAsset(asset, path) {
   state.asset = asset;
   state.assetPath = path;
   state.workingMotions = JSON.parse(JSON.stringify(asset.motions));
+  state.frameCount = asset.frame_count ?? DEFAULT_FRAME_COUNT;
 
   state.animationSpeed = assetAnimationSpeed(asset);
   animationSpeedInput.value = state.animationSpeed;
   updateAnimationSpeedNote();
   updateAssetPathLabel();
   updateEditorAvailability();
+  buildAssetSection();
 
   const [w, h] = asset.size;
   state.baseScale = clamp(560 / Math.max(w, h), 1, 6);
@@ -687,6 +730,13 @@ function selectLayer(index) {
   inspectorTitleEl.textContent = state.motion
     ? state.motion.label || MOTION_LABELS[state.motion.type] || state.motion.type
     : "Inspector";
+  if (state.motion) {
+    layerSectionEl.classList.remove("hidden");
+    layerSectionSubtitleEl.textContent = state.motion.label || MOTION_LABELS[state.motion.type] || state.motion.type;
+  } else {
+    layerSectionEl.classList.add("hidden");
+    layerSectionSubtitleEl.textContent = "Select a layer";
+  }
   state.selectedHandleId = null;
   renderLayerList();
   resizeCanvas();
@@ -3638,6 +3688,32 @@ function buildVibrationPanels(motion) {
   genericPanel.appendChild(orderNote);
 }
 
+function buildAssetSection() {
+  if (!state.asset) {
+    assetSectionEl.classList.add("hidden");
+    return;
+  }
+  assetSectionEl.classList.remove("hidden");
+  assetFrameCountEl.value = state.frameCount;
+  assetSheetColumnsEl.textContent = sheetColumns(state.frameCount);
+  updateSheetSizeDisplay();
+}
+
+function updateSheetSizeDisplay() {
+  if (!state.asset) {
+    assetSheetSizeEl.textContent = "—";
+    return;
+  }
+  const [w, h] = state.asset.size;
+  const frameCount = state.frameCount;
+  const cols = sheetColumns(frameCount);
+  const rows = frameCount / cols;
+  const sheetW = w * cols;
+  const sheetH = h * rows;
+  assetSheetColumnsEl.textContent = String(cols);
+  assetSheetSizeEl.textContent = `${sheetW} × ${sheetH} (${cols}×${rows})`;
+}
+
 function buildPanels() {
   const motion = state.motion;
   state.refreshCallbacks = [];
@@ -3758,7 +3834,7 @@ function buildPanels() {
     const speedNote = document.createElement("p");
     speedNote.className = "muted-note";
     speedNote.textContent =
-      "Rotation speed: how many blade/tooth pitches this layer advances over one 24-frame loop. " +
+      "Rotation speed: how many blade/tooth pitches this layer advances over the configured frame loop. " +
       "Must be a whole number to keep the loop seamless -- higher looks faster.";
     geometryPanel.appendChild(speedNote);
 
@@ -3869,13 +3945,12 @@ async function doRender() {
   }
 
   setStatus("Rendering…");
-  const phases = Array.from({ length: PHASE_COUNT }, (_, i) => i / PHASE_COUNT);
   let payload;
   try {
     payload = await api.preview({
       motions: state.workingMotions,
       selected_index: state.motionIndex,
-      phases,
+      frame_count: state.frameCount,
       isolate: isolateToggle.checked,
     });
   } catch (error) {
@@ -4098,6 +4173,31 @@ animationSpeedInput.addEventListener("input", () => {
   updateDirtyIndicator();
 });
 
+assetFrameCountEl.addEventListener("input", () => {
+  const value = Number(assetFrameCountEl.value);
+  if (!validFrameCount(value)) {
+    assetFrameCountEl.setCustomValidity("Choose a non-prime whole number from 1 to 64.");
+    return;
+  }
+  assetFrameCountEl.setCustomValidity("");
+  state.frameCount = value;
+  updateAnimationSpeedNote();
+  updateSheetSizeDisplay();
+  updateDirtyIndicator();
+  scheduleRender(true);
+});
+
+assetFrameCountEl.addEventListener("change", () => {
+  const value = Number(assetFrameCountEl.value);
+  if (!validFrameCount(value)) {
+    assetFrameCountEl.value = state.frameCount;
+    assetFrameCountEl.setCustomValidity("");
+    setStatus("Frame count must be a non-prime whole number from 1 to 64.", "error");
+    return;
+  }
+  assetFrameCountEl.setCustomValidity("");
+});
+
 playToggle.addEventListener("click", () => {
   state.playing = !state.playing;
   playToggle.textContent = state.playing ? "Pause" : "Play";
@@ -4178,7 +4278,7 @@ async function exportGif() {
       selected_index: state.motionIndex >= 0 ? state.motionIndex : 0,
       isolate: isolateToggle.checked,
       animation_speed: state.animationSpeed,
-      frame_count: FRAME_COUNT,
+      frame_count: state.frameCount,
     });
     const a = document.createElement("a");
     a.href = "data:image/gif;base64," + payload.gif;
@@ -4205,6 +4305,7 @@ async function saveAsset() {
     payload = await api.save({
       motions: state.workingMotions,
       animation_speed: state.animationSpeed,
+      frame_count: state.frameCount,
     });
   } catch (error) {
     setStatus("Save failed: " + error.message, "error");
@@ -4212,6 +4313,7 @@ async function saveAsset() {
   }
   state.asset.motions = JSON.parse(JSON.stringify(state.workingMotions));
   state.asset.animation_speed = state.animationSpeed;
+  state.asset.frame_count = state.frameCount;
   updateDirtyIndicator();
   setStatus(payload.warning ? payload.warning : "Saved all layers", payload.warning ? "error" : "ok");
   return true;

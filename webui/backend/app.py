@@ -17,7 +17,7 @@ from .config import AppConfig
 from .errors import ApiError
 from .rendering import RenderService
 from .session import EditorSession
-from .validation import require_number, require_object, validate_motions
+from .validation import require_frame_count, require_number, require_object, validate_motions
 
 JsonHandler = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -154,9 +154,16 @@ class EditorApplication:
         asset, _path = self.session.current()
         self.renderer.trim_motion_caches()
         motions = validate_motions(body.get("motions"))
-        phases = body.get("phases", [0.0])
-        if not isinstance(phases, list) or not 1 <= len(phases) <= 24:
-            raise ApiError("phases must contain 1–24 values", code="invalid_phases")
+        if "frame_count" in body:
+            frame_count = require_frame_count(body["frame_count"])
+            phases = [index / frame_count for index in range(frame_count)]
+        else:
+            phases = body.get("phases", [0.0])
+            if not isinstance(phases, list) or not 1 <= len(phases) <= asset_store.MAX_FRAME_COUNT:
+                raise ApiError(
+                    f"phases must contain 1–{asset_store.MAX_FRAME_COUNT} values",
+                    code="invalid_phases",
+                )
         selected_index = int(require_number(body.get("selected_index", 0), "selected_index", minimum=0))
         isolate = bool(body.get("isolate", True))
         frames = [
@@ -184,8 +191,9 @@ class EditorApplication:
             "animation_speed",
             minimum=0.01,
         )
-        frame_count = int(require_number(body.get("frame_count", asset_store.FRAME_COUNT), "frame_count", minimum=1))
-        frame_count = min(64, frame_count)
+        frame_count = require_frame_count(
+            body.get("frame_count", asset.get("frame_count", asset_store.FRAME_COUNT))
+        )
         duration_ms = max(20, min(500, int(round((1000 / (60 * speed)) * 10 / frame_count))))
         if not motions:
             images = [self.renderer.source(asset)]
@@ -203,7 +211,11 @@ class EditorApplication:
         }
 
     def save(self, body: dict[str, Any]) -> dict[str, Any]:
-        result = self.session.save(body.get("motions"), body.get("animation_speed", 0.25))
+        result = self.session.save(
+            body.get("motions"),
+            body.get("animation_speed", 0.25),
+            body.get("frame_count"),
+        )
         try:
             import sync_lua_animation_speed as sync_lua
 

@@ -7,7 +7,7 @@ from typing import Any
 
 from .assets import AssetService
 from .errors import NoAssetOpenError
-from .validation import require_number, validate_asset, validate_motions
+from .validation import require_frame_count, require_number, validate_asset, validate_motions
 
 
 class EditorSession:
@@ -44,7 +44,7 @@ class EditorSession:
             self._path = path.resolve()
             return self.snapshot()
 
-    def save(self, motions: Any, animation_speed: Any) -> dict[str, Any]:
+    def save(self, motions: Any, animation_speed: Any, frame_count: Any = None) -> dict[str, Any]:
         validated_motions = validate_motions(motions)
         speed = require_number(animation_speed, "animation_speed", minimum=0.01)
         with self._lock:
@@ -53,6 +53,10 @@ class EditorSession:
             updated = copy.deepcopy(self._asset)
             updated["motions"] = validated_motions
             updated["animation_speed"] = speed
+            if frame_count is not None:
+                updated["frame_count"] = require_frame_count(frame_count)
+            # Remove the old user-authored layout field when an asset is saved.
+            updated.pop("line_length", None)
             self.assets.save(updated, self._path)
             self._asset = updated
             return self.snapshot()

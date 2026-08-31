@@ -7,6 +7,7 @@ from pathlib import Path
 
 from PIL import Image
 
+import asset_store
 from webui.backend.app import EditorApplication
 from webui.backend.assets import AssetService
 from webui.backend.config import AppConfig
@@ -59,6 +60,17 @@ class ValidationTests(BackendFixture):
         with self.assertRaisesRegex(ApiError, "motion type"):
             validate_asset(asset)
 
+    def test_rejects_prime_frame_count(self) -> None:
+        asset = self.make_asset()
+        asset["frame_count"] = 13
+        with self.assertRaisesRegex(ApiError, "cannot be prime"):
+            validate_asset(asset)
+
+    def test_frame_count_derives_rectangular_sheet_columns(self) -> None:
+        self.assertEqual(asset_store.sheet_columns(24), 6)
+        self.assertEqual(asset_store.sheet_columns(20), 5)
+        self.assertEqual(asset_store.sheet_columns(49), 7)
+
 
 class AssetServiceTests(BackendFixture):
     def test_save_load_and_browse_are_configurable(self) -> None:
@@ -110,6 +122,20 @@ class EditorSessionTests(BackendFixture):
         path.write_text(json.dumps(on_disk))
         self.assertEqual(session.reload()["asset"]["animation_speed"], 0.75)
 
+    def test_save_persists_frame_count_and_removes_legacy_columns(self) -> None:
+        service = AssetService(self.config)
+        asset = self.make_asset()
+        asset["line_length"] = 4
+        path = self.config.assets_dir / "sample.json"
+        service.save(asset, path)
+        session = EditorSession(service)
+        session.open(path)
+        session.save([], 0.5, 20)
+
+        on_disk = json.loads(path.read_text())
+        self.assertEqual(on_disk["frame_count"], 20)
+        self.assertNotIn("line_length", on_disk)
+
 
 class ApplicationTests(BackendFixture):
     def test_health_and_asset_metadata(self) -> None:
@@ -136,10 +162,39 @@ class ApplicationTests(BackendFixture):
         application.open_on_startup(path)
 
         result = application.preview(
-            {"motions": asset["motions"], "selected_index": 0, "phases": [0.0], "isolate": True}
+            {"motions": asset["motions"], "selected_index": 0, "frame_count": 12, "isolate": True}
         )
-        self.assertEqual(len(result["frames"]), 1)
+        self.assertEqual(len(result["frames"]), 12)
         self.assertGreater(len(result["frames"][0]), 20)
+
+    def test_export_uses_requested_frame_count(self) -> None:
+        service = AssetService(self.config)
+        asset = self.make_asset()
+        asset["motions"] = [
+            {
+                "type": "pulse",
+                "center": [8, 6],
+                "radius": [3, 2],
+                "color": [255, 120, 30],
+                "alpha": 60,
+                "blur": 1,
+            }
+        ]
+        path = self.config.assets_dir / "sample.json"
+        service.save(asset, path)
+        application = EditorApplication(self.config)
+        application.open_on_startup(path)
+
+        result = application.export_gif(
+            {
+                "motions": asset["motions"],
+                "selected_index": 0,
+                "frame_count": 12,
+                "isolate": True,
+                "animation_speed": 0.25,
+            }
+        )
+        self.assertEqual(result["frame_count"], 12)
 
 
 if __name__ == "__main__":

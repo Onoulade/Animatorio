@@ -189,11 +189,52 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 .row input[type="number"], .row select { width: 100%; min-width: 0; }
 .row input[type="range"] { flex: 1; min-width: 0; }
 .row .value { width: 42px; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; text-align: right; }
+.asset-section .row .value { flex: 1; width: auto; }
 .vec2 { display: flex; flex: 1; min-width: 0; gap: 5px; }
 .vec2 input { width: 50%; min-width: 0; }
 .button-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .gear-presets button, .gauge-themes button { flex: 1 1 80px; }
 .simple-callout { padding: 8px 10px; border-left: 2px solid var(--blue); border-radius: 4px; background: var(--blue-soft); color: var(--muted); line-height: 1.5; }
+
+.asset-section,
+.layer-section {
+  padding: 0;
+}
+.asset-section summary,
+.layer-section summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.asset-section summary::-webkit-details-marker,
+.layer-section summary::-webkit-details-marker {
+  display: none;
+}
+.asset-section summary span,
+.layer-section summary span {
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.asset-section summary small,
+.layer-section summary small {
+  color: var(--faint);
+  font-size: 10px;
+}
+.asset-section[open],
+.layer-section[open] {
+  padding: 0 12px 12px;
+}
+.asset-section[open] summary,
+.layer-section[open] summary {
+  margin: 0 -12px 10px;
+  border-bottom: 1px solid var(--border);
+}
 
 .json-panel { padding: 0; }
 .json-panel summary { display: flex; align-items: center; justify-content: space-between; padding: 12px; cursor: pointer; list-style: none; }
