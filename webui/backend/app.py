@@ -166,6 +166,7 @@ class EditorApplication:
                 )
         selected_index = int(require_number(body.get("selected_index", 0), "selected_index", minimum=0))
         isolate = bool(body.get("isolate", True))
+        lighting = body.get("lighting", asset.get("lighting"))
         frames = [
             self.renderer.encode_png(
                 self.renderer.render_phase(
@@ -174,6 +175,7 @@ class EditorApplication:
                     selected_index,
                     require_number(phase, "phase"),
                     isolate,
+                    lighting,
                 )
             )
             for phase in phases
@@ -194,13 +196,16 @@ class EditorApplication:
         frame_count = require_frame_count(
             body.get("frame_count", asset.get("frame_count", asset_store.FRAME_COUNT))
         )
+        lighting = body.get("lighting", asset.get("lighting"))
         duration_ms = max(20, min(500, int(round((1000 / (60 * speed)) * 10 / frame_count))))
         if not motions:
             images = [self.renderer.source(asset)]
             duration_ms = 500
         else:
             images = [
-                self.renderer.render_phase(asset, motions, selected_index, index / frame_count, isolate)
+                self.renderer.render_phase(
+                    asset, motions, selected_index, index / frame_count, isolate, lighting
+                )
                 for index in range(frame_count)
             ]
         return {
@@ -215,6 +220,7 @@ class EditorApplication:
             body.get("motions"),
             body.get("animation_speed", 0.25),
             body.get("frame_count"),
+            body.get("lighting"),
         )
         try:
             import sync_lua_animation_speed as sync_lua

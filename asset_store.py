@@ -32,6 +32,17 @@ MINIMUM_IDENTITY = 0.84
 # is explicit per asset -- nothing falls back to this afterward.
 NEW_ASSET_ANIMATION_SPEED = 0.25
 
+# Lighting is authored once per asset and can be overridden by individual
+# material-producing motion layers. Angles are measured from screen-left;
+# positive angles turn toward screen-top, so 35 degrees is the default
+# soft upper-left direction.
+DEFAULT_LIGHTING = {
+    "enabled": True,
+    "direction_degrees": 35.0,
+    "strength": 0.24,
+    "ambient": 0.82,
+}
+
 
 def is_prime(value: int) -> bool:
     if value < 2:
@@ -110,4 +121,5 @@ def new_asset(name: str, source: str, output: str, size: tuple[int, int]) -> dic
         "motions": [],
         "animation_speed": NEW_ASSET_ANIMATION_SPEED,
         "frame_count": FRAME_COUNT,
+        "lighting": dict(DEFAULT_LIGHTING),
     }

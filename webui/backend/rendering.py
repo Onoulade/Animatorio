@@ -51,6 +51,7 @@ class RenderService:
         selected_index: int,
         phase: float,
         isolate: bool,
+        lighting: dict[str, Any] | None = None,
     ):
         with self._lock:
             source = self.source(asset)
@@ -62,9 +63,13 @@ class RenderService:
                 handler = ga.MOTION_HANDLERS.get(motion["type"])
                 if handler is None:
                     raise ApiError(f"Unknown motion type: {motion['type']}", code="unknown_motion")
-                handler(frame, source, motion, phase)
+                render_motion = dict(motion)
+                render_motion["_resolved_lighting"] = ga.resolve_lighting(
+                    motion, lighting or asset.get("lighting")
+                )
+                handler(frame, source, render_motion, phase)
                 return frame
-            return ga.animate_frame(source, motions, phase)
+            return ga.animate_frame(source, motions, phase, lighting or asset.get("lighting"))
 
     @staticmethod
     def encode_png(image) -> str:

@@ -189,6 +189,8 @@ input[type="checkbox"], input[type="range"] { accent-color: var(--accent); }
 .row input[type="number"], .row select { width: 100%; min-width: 0; }
 .row input[type="range"] { flex: 1; min-width: 0; }
 .row .value { width: 42px; color: var(--muted); font-size: 10px; font-variant-numeric: tabular-nums; text-align: right; }
+.row > .switch-field { flex: 1 1 auto; }
+.asset-section .row > input[type="number"] { flex: 1; }
 .asset-section .row .value { flex: 1; width: auto; }
 .vec2 { display: flex; flex: 1; min-width: 0; gap: 5px; }
 .vec2 input { width: 50%; min-width: 0; }

@@ -59,6 +59,33 @@ def require_asset_name(value: Any) -> str:
     return value
 
 
+def validate_lighting(
+    value: Any, label: str = "lighting", *, layer: bool = False
+) -> dict[str, Any]:
+    """Validate and normalize the shared lighting contract."""
+    if value is None:
+        value = {}
+    obj = dict(require_object(value, label))
+    if "enabled" in obj and not isinstance(obj["enabled"], bool):
+        raise ApiError(f"{label}.enabled must be a boolean", code="invalid_field")
+    if "direction_degrees" in obj:
+        require_number(obj["direction_degrees"], f"{label}.direction_degrees")
+    if "strength" in obj:
+        strength = require_number(obj["strength"], f"{label}.strength")
+        if not 0.0 <= strength <= 1.0:
+            raise ApiError(f"{label}.strength must be between 0 and 1", code="invalid_field")
+    if "ambient" in obj:
+        ambient = require_number(obj["ambient"], f"{label}.ambient")
+        if not 0.0 <= ambient <= 1.0:
+            raise ApiError(f"{label}.ambient must be between 0 and 1", code="invalid_field")
+    if layer:
+        mode = obj.get("mode", "global")
+        if mode not in {"global", "custom"}:
+            raise ApiError(f"{label}.mode must be 'global' or 'custom'", code="invalid_field")
+        obj["mode"] = mode
+    return obj
+
+
 def validate_asset(asset: Any) -> dict[str, Any]:
     obj = dict(require_object(asset, "asset"))
     require_asset_name(obj.get("name"))
@@ -72,11 +99,22 @@ def validate_asset(asset: Any) -> dict[str, Any]:
     for index, motion in enumerate(motions):
         if not isinstance(motion, Mapping) or not isinstance(motion.get("type"), str):
             raise ApiError(f"asset.motions[{index}] must have a motion type", code="invalid_asset")
+        if "lighting" in motion:
+            motion_lighting = validate_lighting(
+                motion["lighting"], f"asset.motions[{index}].lighting", layer=True
+            )
+            # Keep the normalized nested object in the returned asset.
+            motion = dict(motion)
+            motion["lighting"] = motion_lighting
+            motions[index] = motion
     speed = obj.get("animation_speed", 0.25)
     require_number(speed, "asset.animation_speed", minimum=0.01)
     # Optional frame_count for sprite sheet generation. Columns are derived.
     if "frame_count" in obj:
         require_frame_count(obj["frame_count"], "asset.frame_count")
+    lighting = validate_lighting(obj.get("lighting"), "asset.lighting")
+    defaults = asset_store.DEFAULT_LIGHTING
+    obj["lighting"] = {**defaults, **lighting}
     # `line_length` was the old editable layout field. Keep it out of the
     # normalized asset contract; generation derives the columns from frames.
     obj.pop("line_length", None)
@@ -85,7 +123,14 @@ def validate_asset(asset: Any) -> dict[str, Any]:
 
 def validate_motions(value: Any) -> list[dict[str, Any]]:
     motions = require_list(value, "motions")
+    normalized: list[dict[str, Any]] = []
     for index, motion in enumerate(motions):
         if not isinstance(motion, Mapping) or not isinstance(motion.get("type"), str):
             raise ApiError(f"motions[{index}] must have a motion type", code="invalid_motion")
-    return [dict(motion) for motion in motions]
+        normalized_motion = dict(motion)
+        if "lighting" in normalized_motion:
+            normalized_motion["lighting"] = validate_lighting(
+                normalized_motion["lighting"], f"motions[{index}].lighting", layer=True
+            )
+        normalized.append(normalized_motion)
+    return normalized

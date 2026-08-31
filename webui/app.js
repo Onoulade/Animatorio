@@ -39,6 +39,12 @@ const layerSectionSubtitleEl = el("layer-section-subtitle");
 const assetFrameCountEl = el("asset-frame-count");
 const assetSheetColumnsEl = el("asset-sheet-columns");
 const assetSheetSizeEl = el("asset-sheet-size");
+const assetLightingEnabledEl = el("asset-lighting-enabled");
+const assetLightingDirectionEl = el("asset-lighting-direction");
+const assetLightingStrengthEl = el("asset-lighting-strength");
+const assetLightingStrengthValueEl = el("asset-lighting-strength-value");
+const assetLightingAmbientEl = el("asset-lighting-ambient");
+const assetLightingAmbientValueEl = el("asset-lighting-ambient-value");
 
 const MOTION_LABELS = {
   mechanical_rotor: "Rotor / fan",
@@ -60,6 +66,12 @@ const MOTION_LABELS = {
 // Can be overridden per asset via the Asset inspector section.
 const DEFAULT_FRAME_COUNT = 24;
 const MAX_FRAME_COUNT = 64;
+const DEFAULT_LIGHTING = {
+  enabled: true,
+  direction_degrees: 35,
+  strength: 0.24,
+  ambient: 0.82,
+};
 
 const state = {
   // The single currently-open asset's full data (name/source/output/size/
@@ -80,6 +92,7 @@ const state = {
   // Per-asset frame count, persisted into the asset JSON. Sheet columns are
   // derived from this count.
   frameCount: 24,
+  lighting: { ...DEFAULT_LIGHTING },
   baseScale: 1,
   zoom: 1,
   frameImages: [],
@@ -177,6 +190,7 @@ function clearAssetView() {
   state.motionIndex = -1;
   state.motion = null;
   state.frameCount = DEFAULT_FRAME_COUNT;
+  state.lighting = { ...DEFAULT_LIGHTING };
   state.frameImages = [];
   layerListEl.innerHTML = "";
   geometryPanel.innerHTML = "";
@@ -255,6 +269,10 @@ function assetAnimationSpeed(asset) {
   return asset.animation_speed ?? 0.25;
 }
 
+function assetLighting(asset) {
+  return { ...DEFAULT_LIGHTING, ...(asset?.lighting || {}) };
+}
+
 // animation_speed is frames advanced per tick, 60 ticks/sec. It controls
 // preview timing only; the user can apply the generated sheet however they
 // like in the target game or application.
@@ -274,7 +292,8 @@ function hasUnsavedChanges() {
   if (!state.asset) return false;
   if (JSON.stringify(state.workingMotions) !== JSON.stringify(state.asset.motions)) return true;
   if (Math.abs(state.animationSpeed - assetAnimationSpeed(state.asset)) > 1e-9) return true;
-  return state.frameCount !== (state.asset.frame_count ?? DEFAULT_FRAME_COUNT);
+  if (state.frameCount !== (state.asset.frame_count ?? DEFAULT_FRAME_COUNT)) return true;
+  return JSON.stringify(state.lighting) !== JSON.stringify(assetLighting(state.asset));
 }
 
 function updateDirtyIndicator() {
@@ -703,6 +722,7 @@ function applyOpenedAsset(asset, path) {
   state.assetPath = path;
   state.workingMotions = JSON.parse(JSON.stringify(asset.motions));
   state.frameCount = asset.frame_count ?? DEFAULT_FRAME_COUNT;
+  state.lighting = assetLighting(asset);
 
   state.animationSpeed = assetAnimationSpeed(asset);
   animationSpeedInput.value = state.animationSpeed;
@@ -2585,7 +2605,65 @@ function buildSweepCircleSection(container, motion) {
   );
 }
 
+function buildLayerLightingSection(container, motion) {
+  const heading = document.createElement("h2");
+  heading.textContent = "Lighting";
+  container.appendChild(heading);
+
+  const lighting = motion.lighting || { mode: "global" };
+  const modeRow = row("Light source");
+  const modeSelect = document.createElement("select");
+  for (const [value, label] of [
+    ["global", "Follow asset global light"],
+    ["custom", "Custom for this layer"],
+  ]) {
+    const option = document.createElement("option");
+    option.value = value;
+    option.textContent = label;
+    option.selected = (lighting.mode || "global") === value;
+    modeSelect.appendChild(option);
+  }
+  modeSelect.addEventListener("change", () => {
+    motion.lighting = { ...lighting, mode: modeSelect.value };
+    buildPanels();
+    onMotionChanged(true);
+  });
+  modeRow.appendChild(modeSelect);
+  container.appendChild(modeRow);
+
+  if (lighting.mode === "custom") {
+    const directionRow = row("Direction");
+    directionRow.appendChild(
+      numberInput(lighting.direction_degrees ?? 35, (value) => {
+        motion.lighting.direction_degrees = clamp(value, 0, 360);
+        onMotionChanged();
+      }, "1")
+    );
+    const suffix = document.createElement("span");
+    suffix.className = "value";
+    suffix.textContent = "° from left";
+    directionRow.appendChild(suffix);
+    container.appendChild(directionRow);
+    for (const [label, key, fallback] of [
+      ["Directional strength", "strength", DEFAULT_LIGHTING.strength],
+      ["Ambient light", "ambient", DEFAULT_LIGHTING.ambient],
+    ]) {
+      container.appendChild(
+        sliderRow(label, lighting[key] ?? fallback, 0, 1, 0.01, (value) => {
+          motion.lighting[key] = value;
+        })
+      );
+    }
+  }
+  const note = document.createElement("p");
+  note.className = "muted-note";
+  note.textContent =
+    "Used by generated material surfaces such as cogs, rotors, edge-on gears, and gauges.";
+  container.appendChild(note);
+}
+
 function buildCommonPanel(container, motion) {
+  buildLayerLightingSection(container, motion);
   const applicable = COMMON_FIELD_SPECS.filter((spec) => motion[spec.key] !== undefined);
   if (applicable.length === 0) return;
   const heading = document.createElement("h2");
@@ -3695,6 +3773,13 @@ function buildAssetSection() {
   }
   assetSectionEl.classList.remove("hidden");
   assetFrameCountEl.value = state.frameCount;
+  const lighting = state.lighting;
+  assetLightingEnabledEl.checked = Boolean(lighting.enabled);
+  assetLightingDirectionEl.value = lighting.direction_degrees;
+  assetLightingStrengthEl.value = lighting.strength;
+  assetLightingAmbientEl.value = lighting.ambient;
+  assetLightingStrengthValueEl.textContent = Number(lighting.strength).toFixed(2);
+  assetLightingAmbientValueEl.textContent = Number(lighting.ambient).toFixed(2);
   assetSheetColumnsEl.textContent = sheetColumns(state.frameCount);
   updateSheetSizeDisplay();
 }
@@ -3869,6 +3954,8 @@ function buildPanels() {
     motion.type !== "gauge"
   ) {
     buildCommonPanel(commonPanel, motion);
+  } else {
+    buildLayerLightingSection(commonPanel, motion);
   }
 }
 
@@ -3952,6 +4039,7 @@ async function doRender() {
       selected_index: state.motionIndex,
       frame_count: state.frameCount,
       isolate: isolateToggle.checked,
+      lighting: state.lighting,
     });
   } catch (error) {
     setStatus("Render failed: " + error.message, "error");
@@ -4198,6 +4286,33 @@ assetFrameCountEl.addEventListener("change", () => {
   assetFrameCountEl.setCustomValidity("");
 });
 
+assetLightingEnabledEl.addEventListener("change", () => {
+  state.lighting.enabled = assetLightingEnabledEl.checked;
+  updateDirtyIndicator();
+  scheduleRender(true);
+});
+
+assetLightingDirectionEl.addEventListener("input", () => {
+  const value = Number(assetLightingDirectionEl.value);
+  if (!Number.isFinite(value)) return;
+  state.lighting.direction_degrees = clamp(value, 0, 360);
+  updateDirtyIndicator();
+  scheduleRender(true);
+});
+
+for (const [input, valueEl, key] of [
+  [assetLightingStrengthEl, assetLightingStrengthValueEl, "strength"],
+  [assetLightingAmbientEl, assetLightingAmbientValueEl, "ambient"],
+]) {
+  input.addEventListener("input", () => {
+    const value = Number(input.value);
+    state.lighting[key] = value;
+    valueEl.textContent = value.toFixed(2);
+    updateDirtyIndicator();
+    scheduleRender(true);
+  });
+}
+
 playToggle.addEventListener("click", () => {
   state.playing = !state.playing;
   playToggle.textContent = state.playing ? "Pause" : "Play";
@@ -4279,6 +4394,7 @@ async function exportGif() {
       isolate: isolateToggle.checked,
       animation_speed: state.animationSpeed,
       frame_count: state.frameCount,
+      lighting: state.lighting,
     });
     const a = document.createElement("a");
     a.href = "data:image/gif;base64," + payload.gif;
@@ -4306,6 +4422,7 @@ async function saveAsset() {
       motions: state.workingMotions,
       animation_speed: state.animationSpeed,
       frame_count: state.frameCount,
+      lighting: state.lighting,
     });
   } catch (error) {
     setStatus("Save failed: " + error.message, "error");
@@ -4314,6 +4431,7 @@ async function saveAsset() {
   state.asset.motions = JSON.parse(JSON.stringify(state.workingMotions));
   state.asset.animation_speed = state.animationSpeed;
   state.asset.frame_count = state.frameCount;
+  state.asset.lighting = JSON.parse(JSON.stringify(state.lighting));
   updateDirtyIndicator();
   setStatus(payload.warning ? payload.warning : "Saved all layers", payload.warning ? "error" : "ok");
   return true;

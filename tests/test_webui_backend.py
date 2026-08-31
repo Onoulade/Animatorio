@@ -5,9 +5,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import numpy as np
 from PIL import Image
 
 import asset_store
+import generate_animations as ga
 from webui.backend.app import EditorApplication
 from webui.backend.assets import AssetService
 from webui.backend.config import AppConfig
@@ -71,6 +73,30 @@ class ValidationTests(BackendFixture):
         self.assertEqual(asset_store.sheet_columns(20), 5)
         self.assertEqual(asset_store.sheet_columns(49), 7)
 
+    def test_lighting_defaults_and_layer_override(self) -> None:
+        asset = validate_asset(self.make_asset())
+        self.assertEqual(asset["lighting"], asset_store.DEFAULT_LIGHTING)
+        custom = {
+            **self.make_asset(),
+            "lighting": {"direction_degrees": 90},
+            "motions": [{"type": "mechanical_gear", "lighting": {"mode": "custom", "direction_degrees": 180}}],
+        }
+        normalized = validate_asset(custom)
+        self.assertEqual(normalized["lighting"]["direction_degrees"], 90)
+        self.assertEqual(normalized["motions"][0]["lighting"]["mode"], "custom")
+
+    def test_directional_lighting_follows_direction(self) -> None:
+        nx = np.asarray([[-1.0, 1.0]], dtype=np.float32)
+        ny = np.zeros_like(nx)
+        field = ga.directional_lighting(nx, ny, {"direction_degrees": 0, "strength": 0.5, "ambient": 0.5})
+        self.assertGreater(field[0, 0], field[0, 1])
+        top_bottom = np.asarray([[-1.0], [1.0]], dtype=np.float32)
+        vertical = ga.directional_lighting(
+            np.zeros_like(top_bottom), top_bottom,
+            {"direction_degrees": 90, "strength": 0.5, "ambient": 0.5},
+        )
+        self.assertGreater(vertical[0, 0], vertical[1, 0])
+
 
 class AssetServiceTests(BackendFixture):
     def test_save_load_and_browse_are_configurable(self) -> None:
@@ -113,10 +139,15 @@ class EditorSessionTests(BackendFixture):
         session = EditorSession(service)
 
         session.open(path)
-        session.save([{"type": "pulse", "center": [8, 6]}], 0.5)
+        session.save(
+            [{"type": "pulse", "center": [8, 6]}],
+            0.5,
+            lighting={"direction_degrees": 90},
+        )
         on_disk = json.loads(path.read_text())
         self.assertEqual(on_disk["animation_speed"], 0.5)
         self.assertEqual(on_disk["motions"][0]["type"], "pulse")
+        self.assertEqual(on_disk["lighting"]["direction_degrees"], 90)
 
         on_disk["animation_speed"] = 0.75
         path.write_text(json.dumps(on_disk))

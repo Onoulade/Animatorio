@@ -12,6 +12,7 @@ import argparse
 import json
 import math
 import os
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +28,62 @@ PIPELINE = Path(__file__).resolve().parent
 ROOT = Path(os.environ.get("ANIMATORIO_ASSET_ROOT", os.environ.get("ANIMATORIO_ROOT", PIPELINE)))
 GEAR_MATERIAL_CACHE: dict[tuple[Any, ...], Image.Image] = {}
 VERTICAL_GEAR_DETAIL_CACHE: dict[tuple[Any, ...], np.ndarray] = {}
+
+
+def resolve_lighting(
+    spec: Mapping[str, Any] | None = None,
+    asset_lighting: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Resolve an asset light plus an optional per-layer custom override."""
+    spec = spec or {}
+    lighting = dict(asset_store.DEFAULT_LIGHTING)
+    if isinstance(asset_lighting, Mapping):
+        lighting.update(asset_lighting)
+    layer_lighting = spec.get("lighting")
+    if (
+        isinstance(layer_lighting, Mapping)
+        and layer_lighting.get("mode", "global") == "custom"
+    ):
+        lighting.update({key: value for key, value in layer_lighting.items() if key != "mode"})
+    return lighting
+
+
+def active_lighting(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """Use the pre-resolved render light, or the defaults for direct handlers."""
+    resolved = spec.get("_resolved_lighting")
+    return dict(resolved) if isinstance(resolved, Mapping) else resolve_lighting(spec)
+
+
+def directional_lighting(
+    nx: np.ndarray, ny: np.ndarray, lighting: Mapping[str, Any]
+) -> np.ndarray:
+    """Return a gentle screen-space diffuse field for normalized coordinates."""
+    if not bool(lighting.get("enabled", True)):
+        return np.ones_like(nx, dtype=np.float32)
+    angle = math.radians(float(lighting.get("direction_degrees", 35.0)) % 360.0)
+    # 0° is from screen-left; positive angles turn toward screen-top.  This
+    # uses the conventional image-editor orientation requested by the UI,
+    # where 90° is the top edge rather than the bottom edge.
+    light_x, light_y = -math.cos(angle), -math.sin(angle)
+    ambient = float(lighting.get("ambient", asset_store.DEFAULT_LIGHTING["ambient"]))
+    strength = float(lighting.get("strength", asset_store.DEFAULT_LIGHTING["strength"]))
+    return np.clip(ambient + strength * (nx * light_x + ny * light_y), 0.08, 1.7)
+
+
+def apply_image_lighting(
+    image: Image.Image,
+    spec: Mapping[str, Any],
+    center: tuple[float, float],
+    scale: float,
+) -> Image.Image:
+    """Shade only non-transparent pixels in an already-rendered material layer."""
+    values = np.asarray(image).astype(np.float32)
+    yy, xx = np.mgrid[0 : image.height, 0 : image.width].astype(np.float32)
+    normalized_scale = max(1.0, float(scale))
+    nx = (xx - float(center[0])) / normalized_scale
+    ny = (yy - float(center[1])) / normalized_scale
+    values[:, :, :3] *= directional_lighting(nx, ny, active_lighting(spec))[:, :, None]
+    return Image.fromarray(np.clip(values, 0, 255).astype(np.uint8))
 
 
 def load_rgba(path: Path) -> Image.Image:
@@ -305,7 +362,7 @@ def rotor_cavity_layer(source: Image.Image, spec: dict[str, Any]) -> Image.Image
     local = (radius > 0.30) & (radius < 0.92)
     base = np.percentile(src[local], float(spec.get("cavity_percentile", 18)), axis=0)
     radial = np.clip(0.78 + 0.20 * radius, 0.72, 1.0)
-    screen_light = np.clip(0.90 + 0.07 * nx + 0.12 * ny, 0.72, 1.12)
+    screen_light = directional_lighting(nx, ny, active_lighting(spec))
     rgb = base[None, None, :] * radial[:, :, None] * screen_light[:, :, None]
     texture = 1.7 * np.sin(xx * 0.71 + yy * 0.19) + 1.1 * np.cos(xx * 0.23 - yy * 0.49)
     rgb += texture[:, :, None]
@@ -346,10 +403,7 @@ def rotor_hub_layer(source: Image.Image, spec: dict[str, Any]) -> Image.Image:
     radius2 = nx * nx + ny * ny
     inside = radius2 <= 1.0
     z = np.sqrt(np.clip(1.0 - radius2, 0.0, 1.0))
-    light = np.asarray(spec.get("light_direction", [-0.48, -0.58, 0.93]), dtype=np.float32)
-    light /= np.linalg.norm(light)
-    lambert = nx * light[0] + ny * light[1] + z * light[2]
-    illumination = np.clip(0.43 + 0.61 * lambert, 0.32, 1.07)
+    illumination = directional_lighting(nx, ny, active_lighting(spec)) * (0.94 + 0.06 * z)
     native_x = np.floor(xx / supersample)
     native_y = np.floor(yy / supersample)
     grain = 6.0 * np.sin(native_x * 1.73 + native_y * 0.81) + 3.5 * np.cos(
@@ -490,19 +544,11 @@ def add_mechanical_rotor(frame: Image.Image, source: Image.Image, spec: dict[str
         affine,
         resample=Image.Resampling.BICUBIC,
     )
-    values = np.asarray(tilted).astype(np.float32)
-    height, width = values.shape[:2]
-    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
-    nx = (xx - (width - 1) / 2) / max(1.0, width / 2)
-    ny = (yy - (height - 1) / 2) / max(1.0, height / 2)
-    light = np.clip(0.78 - 0.08 * nx + 0.34 * ny, 0.56, 1.16)
-    values[:, :, :3] *= light[:, :, None]
-    tilted = Image.fromarray(np.clip(values, 0, 255).astype(np.uint8))
-
     rotor = Image.new("RGBA", (source.width * supersample, source.height * supersample), (0, 0, 0, 0))
     rotor.alpha_composite(tilted, (x0, y0))
     rotor = rotor.resize(source.size, Image.Resampling.LANCZOS)
     rotor.putalpha(ImageChops.multiply(rotor.getchannel("A"), aperture))
+    rotor = apply_image_lighting(rotor, spec, (center_x, center_y), maximum_axis)
 
     shadow_alpha = rotor.getchannel("A").filter(ImageFilter.GaussianBlur(0.65))
     shadow_alpha = ImageChops.offset(shadow_alpha, 1, 1).point(lambda value: int(value * 0.38))
@@ -821,10 +867,7 @@ def gear_procedural_center_cap(source: Image.Image, spec: dict[str, Any]) -> Ima
     radius2 = nx * nx + ny * ny
     inside = radius2 <= 1.0
     z = np.sqrt(np.clip(1.0 - radius2, 0.0, 1.0))
-    light = np.asarray(spec.get("light_direction", [-0.48, -0.58, 0.93]), dtype=np.float32)
-    light /= np.linalg.norm(light)
-    lambert = nx * light[0] + ny * light[1] + z * light[2]
-    illumination = np.clip(0.43 + 0.61 * lambert, 0.32, 1.07)
+    illumination = directional_lighting(nx, ny, active_lighting(spec)) * (0.94 + 0.06 * z)
     native_x = np.floor(xx / supersample)
     native_y = np.floor(yy / supersample)
     grain = 6.0 * np.sin(native_x * 1.73 + native_y * 0.81) + 3.5 * np.cos(
@@ -1153,20 +1196,12 @@ def add_mechanical_gear(frame: Image.Image, source: Image.Image, spec: dict[str,
         affine,
         resample=Image.Resampling.BICUBIC,
     )
-    values = np.asarray(tilted).astype(np.float32)
-    height, width = values.shape[:2]
-    sy, sx = np.mgrid[0:height, 0:width].astype(np.float32)
-    screen_x = (sx - (width - 1) / 2) / max(1.0, width / 2)
-    screen_y = (sy - (height - 1) / 2) / max(1.0, height / 2)
-    lighting = np.clip(0.78 - 0.16 * screen_x + 0.24 * screen_y, 0.55, 1.18)
-    values[:, :, :3] *= lighting[:, :, None]
-    tilted = Image.fromarray(np.clip(values, 0, 255).astype(np.uint8))
-
     gear = Image.new("RGBA", (source.width * supersample, source.height * supersample), (0, 0, 0, 0))
     gear.alpha_composite(tilted, (x0, y0))
     gear = gear.resize(source.size, Image.Resampling.LANCZOS)
     gear.putalpha(ImageChops.multiply(gear.getchannel("A"), face_aperture))
     gear = apply_gear_source_material(gear, source, annulus, spec)
+    gear = apply_image_lighting(gear, spec, (center_x, center_y), maximum_axis)
     thickness = gear_thickness_layer(gear, source, spec, maximum_axis)
     if thickness.getbbox():
         volume_alpha = ImageChops.lighter(gear.getchannel("A"), thickness.getchannel("A"))
@@ -1630,6 +1665,11 @@ def add_vertical_gear(frame: Image.Image, source: Image.Image, spec: dict[str, A
         + side_rgb * side_coverage[:, :, None]
         + cavity_rgb * gap_coverage[:, :, None]
     )
+    polygon_center = np.mean(np.asarray(visible_polygon, dtype=np.float32), axis=0)
+    lighting_scale = max(1.0, float(max(x1 - x0, y1 - y0)))
+    light_nx = (screen_x - polygon_center[0]) / lighting_scale
+    light_ny = (screen_y - polygon_center[1]) / lighting_scale
+    rgb *= directional_lighting(light_nx, light_ny, active_lighting(spec))[:, :, None]
 
     mask = Image.new("L", (high_width, high_height), 0)
     mask_draw = ImageDraw.Draw(mask)
@@ -1990,6 +2030,12 @@ def add_gauge(frame: Image.Image, source: Image.Image, spec: dict[str, Any], p: 
     draw.polygon(scaled(inner_cap_points), fill=(*pivot_color, 255))
 
     effect = effect.resize(source.size, Image.Resampling.LANCZOS)
+    effect = apply_image_lighting(
+        effect,
+        spec,
+        center,
+        max(float(np.linalg.norm(basis[:, 0])), float(np.linalg.norm(basis[:, 1]))),
+    )
     alpha = ImageChops.multiply(effect.getchannel("A"), source.getchannel("A"))
     if spec.get("clip_to_face", True):
         face_mask = projected_ellipse_mask(
@@ -2153,11 +2199,18 @@ MOTION_HANDLERS = {
 }
 
 
-def animate_frame(source: Image.Image, motions: list[dict[str, Any]], p: float) -> Image.Image:
+def animate_frame(
+    source: Image.Image,
+    motions: list[dict[str, Any]],
+    p: float,
+    asset_lighting: Mapping[str, Any] | None = None,
+) -> Image.Image:
     frame = source.copy()
     for motion in motions:
         handler = MOTION_HANDLERS[motion["type"]]
-        handler(frame, source, motion, p)
+        render_motion = dict(motion)
+        render_motion["_resolved_lighting"] = resolve_lighting(motion, asset_lighting)
+        handler(frame, source, render_motion, p)
     return frame
 
 
@@ -2260,7 +2313,10 @@ def generate_asset(asset: dict[str, Any]) -> dict[str, Any]:
 
     frame_count = asset_store.frame_count_for(asset)
     line_length = asset_store.sheet_columns(frame_count)
-    frames = [animate_frame(source, asset["motions"], phase(index, frame_count)) for index in range(frame_count)]
+    frames = [
+        animate_frame(source, asset["motions"], phase(index, frame_count), asset.get("lighting"))
+        for index in range(frame_count)
+    ]
     identities = [identity_ratio(source, frame) for frame in frames]
     minimum_identity = float(asset.get("minimum_identity", asset_store.MINIMUM_IDENTITY))
     if min(identities) < minimum_identity:
@@ -2284,7 +2340,7 @@ def make_review_sheet(records: list[dict[str, Any]], assets: list[dict[str, Any]
         source = load_rgba(ROOT / asset["source"])
         frame_count = record["frame_count"]
         frames = [
-            animate_frame(source, asset["motions"], phase(index, frame_count))
+            animate_frame(source, asset["motions"], phase(index, frame_count), asset.get("lighting"))
             for index in (0, frame_count // 4, frame_count // 2, frame_count * 3 // 4)
         ]
         samples.append((record["name"], frames))

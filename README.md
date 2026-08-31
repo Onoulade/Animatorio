@@ -44,6 +44,8 @@ The editor previews the same server-side handlers used during generation, so the
 
 The workspace is organized around the editing loop: the layer stack is on the left, the live canvas is in the center, and properties for the selected motion are on the right. Save, GIF export, and sheet generation remain available in the header. Direct JSON editing is still available under **Advanced JSON** when a motion needs a field that does not yet have a visual control.
 
+Lighting is configured per asset under the **Asset** inspector. The default light is 35° from screen-left toward the top-left, with adjustable directional strength and ambient fill. Material-producing layers (cogs, rotors, edge-on gears, and gauges) follow that light by default. A layer can instead set `lighting.mode` to `custom` and provide its own `direction_degrees`, `strength`, and `ambient` values.
+
 ### 3. Generate sprite sheets
 
 ```bash
